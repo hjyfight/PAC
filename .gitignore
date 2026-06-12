@@ -1,0 +1,41 @@
+# ---- datasets ----
+INRIAPerson/
+*.zip
+archive.zip
+
+# ---- training / eval outputs ----
+output/
+output_new/
+output_new_oldEOT/
+runs/
+eval_examples/
+
+# ---- model checkpoints / weights ----
+*.pt
+*.pth
+*.onnx
+*.weights
+
+# ---- generated images ----
+*.png
+*.jpg
+*.jpeg
+
+# ---- paper / reference material (copyright + size) ----
+*.pdf
+paper_text.txt
+article/
+
+# ---- python caches ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+.pytest_cache/
+
+# ---- os / editor ----
+.DS_Store
+Thumbs.db
+
+# ---- claude code local config ----
+.claude/

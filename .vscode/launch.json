@@ -1,0 +1,193 @@
+{
+  // CAPGen 复现完整流程 —— 调试配置（按执行顺序排列）。
+  //
+  // 依赖链（前一步的产物是后一步的输入）：
+  //   1 AdvPatch ─┐
+  //   2 CAPGen-T ─┼─> 5 make_capgen_p（换色源=capgen_t）
+  //   3 CAPGen-T1 ┤
+  //   4 CAPGen-T2 ┘
+  //   1..5 全部就绪 ─> 6 run_table1 ─> 7 run_perm_recolor
+  //
+  // 解释器固定为 conda `capgen` 环境，不依赖 VSCode 选中的解释器。
+  // 想步入 torch / yolov5 内部：把对应配置的 justMyCode 改成 false。
+  // 想快速走查：先用名字带 (smoke) 的配置，参数已缩到 1 epoch / 8 张图。
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "1 · AdvPatch 训练 (free-pixel 基线)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/advpatch_trainer.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "python": "F:/Anaconda/envs/capgen/python.exe",
+      "justMyCode": true,
+      "args": [
+        "--dataset_dir", "./INRIAPerson",
+        "--num_iterations", "200",
+        "--output_dir", "output_new/advpatch"
+      ]
+    },
+    {
+      "name": "1 · AdvPatch (smoke 1ep/8img)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/advpatch_trainer.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "python": "F:/Anaconda/envs/capgen/python.exe",
+      "justMyCode": true,
+      "args": [
+        "--dataset_dir", "./INRIAPerson",
+        "--num_iterations", "1",
+        "--max_train_images", "8",
+        "--output_dir", "output_new/advpatch_smoke"
+      ]
+    },
+    {
+      "name": "2 · CAPGen-T 训练 (环境 K-means 底色 → P0/P1/P2 源)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "python": "F:/Anaconda/envs/capgen/python.exe",
+      "justMyCode": true,
+      "args": [
+        "--mode", "train",
+        "--dataset_dir", "./INRIAPerson",
+        "--num_iterations", "200",
+        "--output_dir", "output_new/capgen_t"
+      ]
+    },
+    {
+      "name": "2 · CAPGen-T (smoke 1ep/8img)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "python": "F:/Anaconda/envs/capgen/python.exe",
+      "justMyCode": true,
+      "args": [
+        "--mode", "train",
+        "--dataset_dir", "./INRIAPerson",
+        "--num_iterations", "1",
+        "--max_train_images", "8",
+        "--output_dir", "output_new/capgen_t_smoke"
+      ]
+    },
+    {
+      "name": "3 · CAPGen-T1 训练 (固定 Bc1)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "python": "F:/Anaconda/envs/capgen/python.exe",
+      "justMyCode": true,
+      "args": [
+        "--mode", "train",
+        "--dataset_dir", "./INRIAPerson",
+        "--base_colors", "bc1",
+        "--num_iterations", "200",
+        "--output_dir", "output_new/capgen_t1"
+      ]
+    },
+    {
+      "name": "4 · CAPGen-T2 训练 (固定 Bc2)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "python": "F:/Anaconda/envs/capgen/python.exe",
+      "justMyCode": true,
+      "args": [
+        "--mode", "train",
+        "--dataset_dir", "./INRIAPerson",
+        "--base_colors", "bc2",
+        "--num_iterations", "200",
+        "--output_dir", "output_new/capgen_t2"
+      ]
+    },
+    {
+      "name": "5 · make_capgen_p (忠实 Eq.4 换色 + R)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/make_capgen_p.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "python": "F:/Anaconda/envs/capgen/python.exe",
+      "justMyCode": true,
+      "args": [
+        "--method", "recolor-trained",
+        "--source_matrix", "output_new/capgen_t/best_color_prob.pt",
+        "--out_dir", "output_new/capgen_p"
+      ]
+    },
+    {
+      "name": "6 · run_table1 (复现 Table 1)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/run_table1.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "python": "F:/Anaconda/envs/capgen/python.exe",
+      "justMyCode": true,
+      "args": [
+        "--dataset_dir", "./INRIAPerson",
+        "--detector", "yolov5s",
+        "--out_json", "output_new/table1_yolov5s.json"
+      ]
+    },
+    {
+      "name": "6 · run_table1 (smoke 8img)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/run_table1.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "python": "F:/Anaconda/envs/capgen/python.exe",
+      "justMyCode": true,
+      "args": [
+        "--dataset_dir", "./INRIAPerson",
+        "--detector", "yolov5s",
+        "--max_images", "8",
+        "--out_json", "output_new/table1_yolov5s_smoke.json"
+      ]
+    },
+    {
+      "name": "7 · run_perm_recolor (12 种颜色排列)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/run_perm_recolor.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "python": "F:/Anaconda/envs/capgen/python.exe",
+      "justMyCode": true,
+      "args": []
+    },
+    {
+      "name": "7 · run_perm_recolor (smoke 30img)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/run_perm_recolor.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "python": "F:/Anaconda/envs/capgen/python.exe",
+      "justMyCode": true,
+      "args": ["--max_images", "30"]
+    },
+    {
+      "name": "▶ 当前文件 (capgen env)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "python": "F:/Anaconda/envs/capgen/python.exe",
+      "justMyCode": true
+    }
+  ]
+}
