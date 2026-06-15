@@ -3,7 +3,7 @@
 Paper §3.3/§4.2 describes CAPGen-P as: keep a strong adversarial pattern (its color
 probability matrix r_k) and replace only its base colors (Eq.4: t_ij = sum_k nc_k * r_k).
 
-Three construction methods are provided:
+Four construction methods are provided:
 
   --method recolor-trained  (RECOMMENDED, faithful to the paper)
       Take a TRAINED 3-color CAPGen-T pattern (--source_matrix) and recolor its base
@@ -11,6 +11,14 @@ Three construction methods are provided:
       patch). The paper's "color-unrestricted AdvPatch" is approximated by a 3-color
       CAPGen trained with good (K-means env) colors -- the strongest faithful source
       pattern that actually has a (r_k, base-colors) decomposition.
+
+  --method advpatch-rgb
+      Directly interpret a free-pixel AdvPatch's RGB channels as the paper's
+      3-channel color-probability matrix m_ijk, then apply Eq.4 with Bc1/Bc2.
+      This is the most literal "AdvPatch pattern + new base colors" path in this
+      codebase: no fitting and no retraining. capgen_p_orig is the canonical
+      RGB-basis rendering of that matrix, while advpatch_raw.png keeps the true
+      raw AdvPatch for comparison.
 
   --method soft  /  --method legacy-kmeans  (CRITIQUE / comparison only)
       Decompose a free-pixel AdvPatch into (r_k, 3 source colors). This CANNOT reproduce
@@ -24,6 +32,9 @@ Usage (faithful):
 Usage (critique artifact):
     python make_capgen_p.py --method soft \
         --advpatch output_new/advpatch/best_advpatch.pt --out_dir output_new/capgen_p_soft
+Usage (direct AdvPatch matrix):
+    python make_capgen_p.py --method advpatch-rgb \
+        --advpatch output_new/advpatch/best_advpatch.pt --out_dir output_new/capgen_p_advpatch_rgb
 """
 import argparse
 import json
@@ -193,6 +204,72 @@ def build_recolor_trained(args):
           f"--output_json {args.out_dir}/eval_p1.json")
 
 
+def build_advpatch_rgb(args):
+    """Direct Eq.4 recolor from a free-pixel AdvPatch.
+
+    This path assumes the trained AdvPatch's three RGB channels are themselves
+    the three-channel color-probability matrix m_ijk. It avoids any K-means or
+    reconstruction optimization. Under CAPGen rendering, r_k is still computed
+    as softmax(log(m_ijk) / tau), then Bc1/Bc2 are substituted for the colors.
+    """
+    patch = load_advpatch(args.advpatch)                          # (3, P, P)
+    _, P, _ = patch.shape
+    save_patch_png(os.path.join(args.out_dir, 'advpatch_raw.png'), patch)
+
+    # m_ijk is interpreted literally as the raw AdvPatch RGB channels.
+    # Save logits such that sigmoid(logits) == m_ijk, matching Eq.(3)'s input.
+    m = np.clip(patch.transpose(1, 2, 0), 1e-5, 1.0 - 1e-5).astype(np.float32)
+    logits = _np_logit(m).astype(np.float32)
+
+    # Canonical basis colors make capgen_p_orig visualize the inferred r_k map.
+    # It is a sanity-view of the extracted pattern, not a lossless raw AdvPatch.
+    rgb_basis = np.array(
+        [[255.0, 0.0, 0.0],
+         [0.0, 255.0, 0.0],
+         [0.0, 0.0, 255.0]],
+        dtype=np.float32,
+    )
+    metrics = reconstruction_metrics(patch, logits, rgb_basis, args.tau)
+
+    print(f"AdvPatch loaded as RGB probability matrix: P={P}, tau={args.tau}")
+    print("m_ijk := raw AdvPatch RGB channels; r_k = Softmax(log(m_ijk) / tau)")
+    print("P_orig RGB-basis rendering vs raw AdvPatch:")
+    print(f"  mse={metrics['mse']:.8f}  mae={metrics['mae']:.6f}  "
+          f"max_abs={metrics['max_abs']:.6f}  psnr={metrics['psnr']:.2f} dB\n")
+
+    print("CAPGen-P (direct AdvPatch RGB-pattern + new colors):")
+    emit(args.out_dir, 'capgen_p1', logits, BC1, args.tau)
+    emit(args.out_dir, 'capgen_p2', logits, BC2, args.tau)
+    emit(args.out_dir, 'capgen_p_orig', logits, rgb_basis, args.tau)
+
+    emit_random_R(args.out_dir, P, args.num_colors, args.tau, args.seed)
+
+    summary = {
+        'advpatch': args.advpatch,
+        'method': 'advpatch-rgb',
+        'num_colors': args.num_colors,
+        'tau': args.tau,
+        'source_colors_rgb': rgb_basis.tolist(),
+        'p_orig_reconstruction': metrics,
+        'note': (
+            'Direct AdvPatch recolor: raw AdvPatch RGB channels are interpreted as '
+            'm_ijk and recolored with Bc1/Bc2 by Eq.4. advpatch_raw.png is the true '
+            'raw AdvPatch; capgen_p_orig is the canonical RGB-basis rendering of '
+            'the inferred probability matrix and is not expected to be lossless.'
+        ),
+    }
+    summary_path = os.path.join(args.out_dir, 'capgen_p_decomposition.json')
+    with open(summary_path, 'w', encoding='utf-8') as f:
+        json.dump(summary, f, indent=2)
+
+    print(f"\nDone -> {args.out_dir}/")
+    print(f"Summary -> {summary_path}")
+    print("Evaluate each on INRIA test, e.g.:")
+    print(f"  python eval_inria.py --dataset_dir ./INRIAPerson "
+          f"--color_prob_path {args.out_dir}/capgen_p1_color_prob.pt "
+          f"--output_json {args.out_dir}/eval_p1.json")
+
+
 def init_palette_luma(pixels, k):
     """Initialize source colors by luminance bins; no hard pattern is kept."""
     lum = pixels @ np.array([0.299, 0.587, 0.114], dtype=np.float32)
@@ -317,8 +394,9 @@ def main():
     ap.add_argument('--out_dir', default='output_new/capgen_p')
     ap.add_argument('--num_colors', type=int, default=3)
     ap.add_argument('--tau', type=float, default=0.1)
-    ap.add_argument('--method', choices=['recolor-trained', 'soft', 'legacy-kmeans'], default='recolor-trained',
+    ap.add_argument('--method', choices=['recolor-trained', 'advpatch-rgb', 'soft', 'legacy-kmeans'], default='recolor-trained',
                     help='recolor-trained = faithful Eq.4 (recolor a trained CAPGen-T pattern, RECOMMENDED); '
+                         'advpatch-rgb = directly treat raw AdvPatch RGB as m_ijk; '
                          'soft/legacy-kmeans = decompose a free-pixel AdvPatch (critique artifact, cannot reproduce)')
     ap.add_argument('--init_palette', choices=['luma', 'kmeans', 'random'], default='luma',
                     help='initial source palette for the soft reconstruction optimizer')
@@ -332,6 +410,9 @@ def main():
 
     if args.method == 'recolor-trained':
         build_recolor_trained(args)
+        return
+    if args.method == 'advpatch-rgb':
+        build_advpatch_rgb(args)
         return
 
     patch = load_advpatch(args.advpatch)                          # (3, P, P) in [0,1]
