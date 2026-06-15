@@ -144,19 +144,21 @@ def emit_random_R(out_dir, P, k, tau, seed):
 
 
 def build_recolor_trained(args):
-    """Faithful CAPGen-P (paper Eq.4): keep a TRAINED CAPGen-T pattern (its color
+    """
+    
+    Faithful CAPGen-P (paper Eq.4): keep a TRAINED CAPGen-T pattern (its color
     probability matrix) and replace only the base colors with Bc1/Bc2.
 
     Unlike --method soft (which lossily fits a free-pixel AdvPatch into 3 colors,
     PSNR ~13 dB), this recolor is EXACT: capgen_p_orig === the source patch, so any
     attack drop on P1/P2 is purely the color swap (Eq.4), as the paper intends.
     """
-    ck = torch.load(args.source_matrix, map_location='cpu')
+    ck = torch.load(args.source_matrix, map_location='cpu') # 读取之前训好的模型
     logits = ck['logits'].numpy().astype(np.float32)                 # (P,P,K) trained pattern
-    src_colors = (ck['base_colors'].numpy() * 255.0).astype(np.float32)  # (K,3) in 0-255
+    src_colors = (ck['base_colors'].numpy() * 255.0).astype(np.float32)  # (K,3) in 0-255，提取训练时的原始颜色
     P, _, K = logits.shape
     tau = float(ck.get('temperature', args.tau))
-    if K != BC1.shape[0]:
+    if K != BC1.shape[0]: # 颜色的种类保持一致
         raise SystemExit(f"source matrix has K={K} base colors but Bc1/Bc2 define "
                          f"{BC1.shape[0]}; recolor-trained needs matching K (paper uses 3).")
     print(f"Recoloring trained pattern from {args.source_matrix}: P={P}, K={K}, tau={tau}")
@@ -165,7 +167,7 @@ def build_recolor_trained(args):
     print("CAPGen-P (trained CAPGen-T pattern + new colors, faithful Eq.4):")
     emit(args.out_dir, 'capgen_p1', logits, BC1, tau)               # paper Bc1
     emit(args.out_dir, 'capgen_p2', logits, BC2, tau)               # paper Bc2
-    emit(args.out_dir, 'capgen_p_orig', logits, src_colors, tau)    # exact == source patch
+    emit(args.out_dir, 'capgen_p_orig', logits, src_colors, tau)    # exact == source patch，不换色的
 
     emit_random_R(args.out_dir, P, K, tau, args.seed)
 

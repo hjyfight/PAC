@@ -119,22 +119,22 @@ class YOLODetector(nn.Module):
         detector to drop the detection.
 
         Args:
-            image_tensor: (B, 3, H, W) in [0, 1]
-            target_class: COCO class index to suppress (0 = person)
+            image_tensor: (B, 3, H, W) in [0, 1] 已经被贴上了 补丁 的图像
+            target_class: COCO class index to suppress (0 = person) 默认对类别0 人进行攻击
 
         Returns:
             Scalar attack loss (differentiable wrt image_tensor)
         """
-        pred = self.forward_raw(image_tensor)        # (B, N, 5+C)
-        obj = pred[..., 4]                            # (B, N) objectness
-        cls = pred[..., 5 + target_class]             # (B, N) target-class prob
-        score = obj * cls                             # (B, N)
+        pred = self.forward_raw(image_tensor)        # (B, N, 5+C) 送入yolo中
+        obj = pred[..., 4]                            # (B, N) objectness 提取所有N个框的目标置信度，有目标的概率
+        cls = pred[..., 5 + target_class]             # (B, N) target-class prob 提取所有N个框是人的概率，是特定类别的概率
+        score = obj * cls                             # (B, N) 算出模型认为这 N 个框是人的最终综合得分：上述俩相乘得到综合指标
 
         # Use a soft-max approximation for stable gradient on "max over anchors"
         # max ≈ logsumexp / temperature
         # but a simple max also has subgradient; we take per-image max then mean.
-        per_image_max, _ = score.max(dim=1)           # (B,)
-        loss = per_image_max.mean()
+        per_image_max, _ = score.max(dim=1)           # (B,)  获取全图得分最高的那个框的分数，用来打低
+        loss = per_image_max.mean()                   # 对整个batch中每张图的最大的得分 求平均
         return loss
 
     # ----- High-level (non-differentiable) detection for evaluation -----

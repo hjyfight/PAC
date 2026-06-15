@@ -36,17 +36,18 @@ class ColorProbabilityMatrix(nn.Module):
         # each pixel has a clear (different) dominant base-color at init.
         # This gives a richer pattern than near-uniform initialization and
         # therefore stronger gradient signal in early epochs.
-        self.logits = nn.Parameter(torch.randn(height, width, num_colors))
+        self.logits = nn.Parameter(torch.randn(height, width, num_colors)) # 被训练的参数，使用随机正态分布噪声初始化，这个就是补丁 
 
     def forward(self, base_colors, temperature=0.1):
         """
+        换色过程
         Generate patch from base colors and color probability matrix.
 
         Based on Eq.(3) from the paper:
         t_ij = Σ(c_k · r_k)
         r_k = Softmax(log(m_ijk) / τ)
 
-        where m ∈ (0,1)^(W×H×3) is the color probability matrix.
+        where m ∈ (0,1)^(W × H × 3) is the color probability matrix.
 
         Args:
             base_colors: torch tensor of shape (num_colors, 3) - RGB values in [0,1]
@@ -56,16 +57,16 @@ class ColorProbabilityMatrix(nn.Module):
             patch: torch tensor of shape (3, H, W) - the generated patch
         """
         # Compute m = sigmoid(logits) to ensure m ∈ (0,1)
-        m = torch.sigmoid(self.logits)  # (H, W, num_colors)
+        m = torch.sigmoid(self.logits)  # (H, W, num_colors)  约束为（0，1）之间，变成矩阵 m
 
         # Compute r_k = Softmax(log(m_ijk) / τ) - Eq.(3)
         log_m = torch.log(m + 1e-8)  # Add epsilon for numerical stability
-        r = F.softmax(log_m / temperature, dim=-1)  # (H, W, num_colors)
+        r = F.softmax(log_m / temperature, dim=-1)  # (H, W, num_colors) 对应公式3中的第二个，r现在是颜色概率矩阵
 
         # Compute patch colors: t_ij = Σ(c_k · r_k)
         # base_colors: (num_colors, 3)
         # r: (H, W, num_colors)
-        patch = torch.einsum('hwk,kc->hwc', r, base_colors)  # (H, W, 3)
+        patch = torch.einsum('hwk,kc->hwc', r, base_colors)  # (H, W, 3) 给像素上色，对应公式3中的第一个
 
         # Clamp to [0, 1]
         patch = torch.clamp(patch, 0, 1)
@@ -128,7 +129,7 @@ class CAPGenGenerator:
         """
         Initialize the color probability matrix.
         """
-        self.color_prob_matrix = ColorProbabilityMatrix(
+        self.color_prob_matrix = ColorProbabilityMatrix( # ColorProbabilityMatrix为生成补丁的具体流程 使用公式3生成
             self.patch_size,
             self.patch_size,
             self.num_base_colors
@@ -144,14 +145,14 @@ class CAPGenGenerator:
         Returns:
             patch: torch tensor of shape (3, H, W)
         """
-        if self.color_prob_matrix is None:
+        if self.color_prob_matrix is None: # 颜色概率矩阵(即pattern)的初始化
             self.initialize_color_prob_matrix()
 
-        if self.base_colors is None:
+        if self.base_colors is None: # 基色
             raise ValueError("Base colors not set. Call set_base_colors first.")
 
-        temp = temperature if temperature is not None else self.temperature
-        self.patch = self.color_prob_matrix(self.base_colors, temp)
+        temp = temperature if temperature is not None else self.temperature # 设置温度
+        self.patch = self.color_prob_matrix(self.base_colors, temp) # 生成补丁
 
         return self.patch
 

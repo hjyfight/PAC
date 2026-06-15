@@ -48,33 +48,36 @@ class FreePixelPatch(torch.nn.Module):
 
     def __init__(self, patch_size=300):
         super().__init__()
-        self.patch_size = patch_size
+        self.patch_size = patch_size # 补丁的分辨率 300 * 300
         # init around 0 -> sigmoid -> ~0.5 grey; small noise breaks symmetry
-        self.logits = torch.nn.Parameter(torch.randn(3, patch_size, patch_size) * 0.1)
+        self.logits = torch.nn.Parameter(torch.randn(3, patch_size, patch_size) * 0.1) # 生成一个形状为（3，300，300）可学习张量
 
     def forward(self):
-        return torch.sigmoid(self.logits)  # (3, P, P) in (0,1)
+        return torch.sigmoid(self.logits)  # (3, P, P) in (0,1) ，带有微小噪声的灰色图片，sigmoid（0）= 0.5
 
 
 def build_training_data(samples, patch_size, image_size=(640, 640)):
-    """Mirror capgen_trainer.prepare_training_data: one (x, y, scale) per person
-    bbox, patch side = sqrt(0.25 * bw * bh) (25% of bbox AREA), in resized coords."""
+    """
+    补丁 占据 bbox 面积的25%，这段代码作用是计算补丁应该缩放多少，以及贴到哪个位置上
+    Mirror capgen_trainer.prepare_training_data: one (x, y, scale) per person
+    bbox, patch side = sqrt(0.25 * bw * bh) (25% of bbox AREA), in resized coords.
+    """
     H, W = image_size
     data = []
     for img, bboxes in samples:
-        iw, ih = img.size
-        sx, sy = W / iw, H / ih
+        iw, ih = img.size # 原始图片的宽高
+        sx, sy = W / iw, H / ih # 宽高的缩放比例
         positions = []
         for (x1, y1, x2, y2) in bboxes:
-            bx1, by1, bx2, by2 = x1 * sx, y1 * sy, x2 * sx, y2 * sy
-            bw, bh = bx2 - bx1, by2 - by1
-            bcx, bcy = (bx1 + bx2) * 0.5, (by1 + by2) * 0.5
-            placed = max(1.0, (0.25 * bw * bh) ** 0.5)
-            scale = float(max(1e-3, placed / patch_size))
+            bx1, by1, bx2, by2 = x1 * sx, y1 * sy, x2 * sx, y2 * sy # 得到 640 * 640 中人的新坐标
+            bw, bh = bx2 - bx1, by2 - by1 # 算出人在640 * 640中的宽和高
+            bcx, bcy = (bx1 + bx2) * 0.5, (by1 + by2) * 0.5 # 算出人的中心坐标
+            placed = max(1.0, (0.25 * bw * bh) ** 0.5) # 放置为25%的面积
+            scale = float(max(1e-3, placed / patch_size)) 
             x = int(round(bcx - placed * 0.5))
             y = int(round(bcy - placed * 0.5))
             x = max(0, min(W - int(placed), x))
-            y = max(0, min(H - int(placed), y))
+            y = max(0, min(H - int(placed), y)) # 算 补丁的位置
             positions.append((x, y, scale))
         if positions:
             data.append((img, positions))
@@ -131,14 +134,14 @@ def main():
             idxs = perm[b:b + args.batch_size]
             optimizer.zero_grad()
             for i in idxs:
-                img, positions = training_data[int(i)]
+                img, positions = training_data[int(i)] # 计算补丁的放置位置以及缩放
                 img_t = transform(img).to(device)
                 patch = patch_module()
                 img_with = img_t
                 for (x, y, scale) in positions:
-                    p_eot = eot(patch.unsqueeze(0)).squeeze(0)
-                    img_with = applier.apply_patch(img_with, p_eot, x, y, scale)
-                loss = detector.objectness_attack_loss(img_with.unsqueeze(0), target_class=0)
+                    p_eot = eot(patch.unsqueeze(0)).squeeze(0) # 对补丁进行 EOT 
+                    img_with = applier.apply_patch(img_with, p_eot, x, y, scale) # 贴补丁
+                loss = detector.objectness_attack_loss(img_with.unsqueeze(0), target_class=0) # 计算损失
                 (loss / len(idxs)).backward()
                 ep_loss += loss.item(); seen += 1
             optimizer.step()

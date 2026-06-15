@@ -192,6 +192,8 @@ class PatchApplier:
         return canvas, mask
 
     def apply_patch(self, image, patch, x, y, scale=1.0):
+
+        # 贴补丁
         """
         Apply (resized) patch to image at (x, y) via differentiable blending.
 
@@ -211,14 +213,14 @@ class PatchApplier:
         ph = max(1, int(patch.shape[-2] * scale))
         pw = max(1, int(patch.shape[-1] * scale))
 
-        # Differentiable resize
+        # Differentiable resize  可微的图像缩放
         patch_resized = F.interpolate(
             patch.unsqueeze(0), size=(ph, pw),
             mode='bilinear', align_corners=False
         ).squeeze(0)
 
-        canvas, mask = self._place(image.shape, patch_resized, x, y)
-        return (1.0 - mask) * image + mask * canvas
+        canvas, mask = self._place(image.shape, patch_resized, x, y) # 获取和原图大小一致的全黑画布，在x y 位置放置缩放后的patch
+        return (1.0 - mask) * image + mask * canvas # 掩码操作，图像融合，贴纸所在区域为1，其他背景区域为0
 
     def apply_patch_random(self, image, patch, scale_range=(0.3, 0.6)):
         if image.dim() == 4:

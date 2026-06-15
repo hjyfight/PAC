@@ -192,15 +192,15 @@ class CAPGenTrainer:
             # Independent EOT sample per bbox - different rotation/brightness
             # per instance, like wearing the patch at slightly different
             # angles. Gradients flow through patch in all of them.
-            patch_eot = self.eot(patch.unsqueeze(0)).squeeze(0)
-            image_with_patch = self.patch_applier.apply_patch(
+            patch_eot = self.eot(patch.unsqueeze(0)).squeeze(0) # 先进行EOT
+            image_with_patch = self.patch_applier.apply_patch( # 把补丁给掩码贴上去
                 image_with_patch, patch_eot, x, y, scale
             )
 
         # Detector forward (raw, differentiable). image_tensor is already
         # at self.image_size, so no extra resize is needed.
         det_input = image_with_patch.unsqueeze(0)
-        loss = self.detector.objectness_attack_loss(
+        loss = self.detector.objectness_attack_loss( # 计算损失
             det_input, target_class=self.target_class
         )
         return loss
