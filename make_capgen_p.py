@@ -71,6 +71,13 @@ def save_patch_png(path, patch_chw):
     Image.fromarray(arr).save(path)
 
 
+def save_raw_patch_pt(path, patch_chw):
+    """Save a rendered patch as patch_logits so raw AdvPatch eval can load it."""
+    patch = np.clip(patch_chw, 1e-5, 1.0 - 1e-5).astype(np.float32)
+    logits = np.log(patch / (1.0 - patch)).astype(np.float32)
+    torch.save({'patch_logits': torch.tensor(logits), 'patch_size': int(patch.shape[-1])}, path)
+
+
 def logits_from_labels(labels, P, k, B=10.0):
     """One-hot-ish logits (P, P, k): +B at the assigned cluster, -B elsewhere, so
     sigmoid -> log -> softmax(/tau) reproduces a hard per-pixel base-color pick
@@ -270,6 +277,88 @@ def build_advpatch_rgb(args):
           f"--output_json {args.out_dir}/eval_p1.json")
 
 
+def build_advpatch_rgb_linear(args):
+    """Literal unnormalized RGB-weight recolor from a free-pixel AdvPatch.
+
+    For each pixel with raw AdvPatch channels w=(R/255, G/255, B/255), render:
+        t_ij = sum_k new_base_color_k * w_k
+    No per-pixel normalization and no Eq.(3) softmax are applied. Values above
+    1 are clipped because the detector consumes images in [0, 1].
+    """
+    patch = load_advpatch(args.advpatch)  # (3, P, P)
+    _, P, _ = patch.shape
+    save_patch_png(os.path.join(args.out_dir, 'advpatch_raw.png'), patch)
+
+    weights = patch.transpose(1, 2, 0).astype(np.float32)  # (P, P, 3)
+    rgb_basis = np.array(
+        [[255.0, 0.0, 0.0],
+         [0.0, 255.0, 0.0],
+         [0.0, 0.0, 255.0]],
+        dtype=np.float32,
+    )
+
+    def render_linear(base_colors_255):
+        rendered = weights @ (base_colors_255 / 255.0)
+        return rendered.clip(0.0, 1.0).transpose(2, 0, 1).astype(np.float32)
+
+    p1 = render_linear(BC1)
+    p2 = render_linear(BC2)
+    p_orig = render_linear(rgb_basis)
+
+    metrics = {
+        'orig_mse': float(np.mean((p_orig - patch) ** 2)),
+        'orig_mae': float(np.mean(np.abs(p_orig - patch))),
+        'orig_max_abs': float(np.max(np.abs(p_orig - patch))),
+    }
+    mse = metrics['orig_mse']
+    metrics['orig_psnr'] = 99.0 if mse <= 1e-12 else float(-10.0 * math.log10(mse))
+
+    print(f"AdvPatch loaded as unnormalized RGB weights: P={P}")
+    print("t_ij := sum_k base_color_k * (raw_rgb_k / 255), with no softmax/no normalization.")
+    print("Rendered values are clipped to [0,1] before saving/evaluation.")
+    print("P_orig RGB-basis rendering vs raw AdvPatch:")
+    print(f"  mse={metrics['orig_mse']:.8f}  mae={metrics['orig_mae']:.6f}  "
+          f"max_abs={metrics['orig_max_abs']:.6f}  psnr={metrics['orig_psnr']:.2f} dB\n")
+
+    outputs = {
+        'capgen_p1_linear': p1,
+        'capgen_p2_linear': p2,
+        'capgen_p_orig_linear': p_orig,
+    }
+    for name, arr in outputs.items():
+        png = os.path.join(args.out_dir, f'{name}.png')
+        pt = os.path.join(args.out_dir, f'{name}.pt')
+        save_patch_png(png, arr)
+        save_raw_patch_pt(pt, arr)
+        print(f"  saved {name:20s} -> {pt}  (+ {os.path.basename(png)})")
+
+    summary = {
+        'advpatch': args.advpatch,
+        'method': 'advpatch-rgb-linear',
+        'weight_interpretation': 'raw AdvPatch RGB/255 -> unnormalized linear weights',
+        'value_range': 'rendered patch is clipped to [0,1]',
+        'source_colors_rgb': rgb_basis.tolist(),
+        'p_orig_reconstruction': metrics,
+        'note': (
+            'Literal implementation of the author example [128/255,64/255,255/255]: '
+            'the raw RGB channels are used as unnormalized weights and directly '
+            'multiplied by Bc1/Bc2. Eq.(3) softmax normalization is intentionally '
+            'bypassed, so these artifacts are raw patch tensors, not CAPGen '
+            'color-probability matrices.'
+        ),
+    }
+    summary_path = os.path.join(args.out_dir, 'capgen_p_linear_decomposition.json')
+    with open(summary_path, 'w', encoding='utf-8') as f:
+        json.dump(summary, f, indent=2)
+
+    print(f"\nDone -> {args.out_dir}/")
+    print(f"Summary -> {summary_path}")
+    print("Evaluate each on INRIA test, e.g.:")
+    print(f"  python eval_inria.py --dataset_dir ./INRIAPerson "
+          f"--raw_patch_pt {args.out_dir}/capgen_p1_linear.pt "
+          f"--output_json {args.out_dir}/eval_p1_linear.json")
+
+
 def init_palette_luma(pixels, k):
     """Initialize source colors by luminance bins; no hard pattern is kept."""
     lum = pixels @ np.array([0.299, 0.587, 0.114], dtype=np.float32)
@@ -394,9 +483,10 @@ def main():
     ap.add_argument('--out_dir', default='output_new/capgen_p')
     ap.add_argument('--num_colors', type=int, default=3)
     ap.add_argument('--tau', type=float, default=0.1)
-    ap.add_argument('--method', choices=['recolor-trained', 'advpatch-rgb', 'soft', 'legacy-kmeans'], default='recolor-trained',
+    ap.add_argument('--method', choices=['recolor-trained', 'advpatch-rgb', 'advpatch-rgb-linear', 'soft', 'legacy-kmeans'], default='recolor-trained',
                     help='recolor-trained = faithful Eq.4 (recolor a trained CAPGen-T pattern, RECOMMENDED); '
                          'advpatch-rgb = directly treat raw AdvPatch RGB as m_ijk; '
+                         'advpatch-rgb-linear = unnormalized raw RGB-weight recolor; '
                          'soft/legacy-kmeans = decompose a free-pixel AdvPatch (critique artifact, cannot reproduce)')
     ap.add_argument('--init_palette', choices=['luma', 'kmeans', 'random'], default='luma',
                     help='initial source palette for the soft reconstruction optimizer')
@@ -413,6 +503,9 @@ def main():
         return
     if args.method == 'advpatch-rgb':
         build_advpatch_rgb(args)
+        return
+    if args.method == 'advpatch-rgb-linear':
+        build_advpatch_rgb_linear(args)
         return
 
     patch = load_advpatch(args.advpatch)                          # (3, P, P) in [0,1]

@@ -7,9 +7,16 @@ archive.zip
 output/
 output_new/
 output_new_oldEOT/
+output_*/
 runs/
 eval_examples/
 output_debug/
+
+# ---- generated eval summaries ----
+output*/**/*.json
+
+# ---- local restore backups ----
+restore_backups/
 
 # ---- model checkpoints / weights ----
 *.pt

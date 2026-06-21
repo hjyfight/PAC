@@ -10,11 +10,11 @@ Methods (skipped automatically if their checkpoint is missing):
   Gray        - solid gray patch
   CAPGen-R1/2 - random CONTINUOUS color-prob matrix (Eq.5) + Bc1/Bc2  (output_new/capgen_p/capgen_r{1,2}_color_prob.pt)
   CAPGen-T1/2 - gradient-trained matrix with fixed Bc1/Bc2            (--t1 / --t2)
-  CAPGen-P0   - faithful CAPGen-P source: trained pattern + its own source colors
-                (== the source CAPGen-T; sanity check)
-  CAPGen-P1/2 - faithful Eq.4: trained CAPGen-T pattern recolored to Bc1/Bc2
-                (output_new/capgen_p/capgen_p{1,2}_color_prob.pt, built by
-                 make_capgen_p.py --method recolor-trained)
+  CAPGen-P0   - the AdvPatch pattern recolored on its own RGB basis (P0 == AdvPatch
+                under --p_method linear)
+  CAPGen-P1/2 - AdvPatch pattern recolored to Bc1/Bc2. Construction selected by
+                --p_method. For the 2026-06-16 linear_fixed state, use
+                --p_method linear and --p_dir output_new/capgen_p_linear.
   AdvPatch    - free-pixel baseline                                   (--advpatch)
 
 Train T1/T2 first with:
@@ -89,6 +89,13 @@ def main():
     ap.add_argument('--t1', default='output_new/capgen_t1/best_color_prob.pt')
     ap.add_argument('--t2', default='output_new/capgen_t2/best_color_prob.pt')
     ap.add_argument('--cp_dir', default='output_new/capgen_p')
+    ap.add_argument('--p_dir', default='output_new/capgen_p_linear',
+                    help='dir with linear PAC-P raw patches: '
+                         'capgen_p{_orig,1,2}_linear.pt')
+    ap.add_argument('--p_method', choices=['linear', 'softmax'], default='linear',
+                    help="'linear' loads raw linear-recolor patches from --p_dir "
+                         "(6/16 linear_fixed state). 'softmax' loads color-prob "
+                         "matrices from --cp_dir.")
     ap.add_argument('--dataset_dir', default='./INRIAPerson')
     ap.add_argument('--detector', default='yolov5s')
     ap.add_argument('--conf', type=float, default=0.01,
@@ -108,6 +115,19 @@ def main():
     applier = PatchApplier(300)
 
     cp = lambda n: os.path.join(args.cp_dir, n)
+    pp = lambda n: os.path.join(args.p_dir, n)
+    if args.p_method == 'linear':
+        p_entries = [
+            ('CAPGen-P0', 'raw', pp('capgen_p_orig_linear.pt')),
+            ('CAPGen-P1', 'raw', pp('capgen_p1_linear.pt')),
+            ('CAPGen-P2', 'raw', pp('capgen_p2_linear.pt')),
+        ]
+    else:
+        p_entries = [
+            ('CAPGen-P0', 'cp', cp('capgen_p_orig_color_prob.pt')),
+            ('CAPGen-P1', 'cp', cp('capgen_p1_color_prob.pt')),
+            ('CAPGen-P2', 'cp', cp('capgen_p2_color_prob.pt')),
+        ]
     plan = [
         ('clean', 'clean', None),
         ('Gray', 'gray', None),
@@ -115,9 +135,7 @@ def main():
         ('CAPGen-R2', 'cp', cp('capgen_r2_color_prob.pt')),
         ('CAPGen-T1', 'cp', args.t1),
         ('CAPGen-T2', 'cp', args.t2),
-        ('CAPGen-P0', 'cp', cp('capgen_p_orig_color_prob.pt')),
-        ('CAPGen-P1', 'cp', cp('capgen_p1_color_prob.pt')),
-        ('CAPGen-P2', 'cp', cp('capgen_p2_color_prob.pt')),
+        *p_entries,
         ('AdvPatch', 'raw', args.advpatch),
     ]
 
