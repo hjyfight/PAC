@@ -35,15 +35,11 @@ class Config:
 
     # ==================== Color Probability Matrix Settings ====================
     # Paper Eq.(3): "r_k = Softmax(log(m_ijk) / τ)"
-    # "τ = 0.1 serves as the optimal choice" -> this is the DEPLOYMENT temperature.
+    # "τ = 0.1 serves as the optimal choice". Keep it fixed during training,
+    # saving, and evaluation for strict paper-style CAPGen-T/R reproduction.
     TEMPERATURE = 0.1
-    # DEVIATION (disclosed): the paper states a fixed τ=0.1. At τ=0.1 the softmax is
-    # near one-hot, which saturates the gradient w.r.t. the logits (the patch barely
-    # learns). We anneal τ from TEMP_START down to TEMPERATURE during training: early
-    # epochs get a strong gradient signal, later epochs sharpen each pixel to a single
-    # base color. The patch is SAVED/EVALUATED at τ=0.1, so deployment matches the paper.
-    TEMP_START = 1.0
-    ANNEAL_TEMPERATURE = True
+    TEMP_START = 0.1
+    ANNEAL_TEMPERATURE = False
 
     # ==================== Training Settings ====================
     # Paper Table 1: "Batch size = 8, Learning rate = 0.03, Epochs = 200"
