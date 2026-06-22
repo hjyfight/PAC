@@ -15,7 +15,6 @@ import os
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
-import torchvision.transforms as transforms
 import numpy as np
 from PIL import Image
 from tqdm import tqdm
@@ -24,6 +23,7 @@ from patch_generator import CAPGenGenerator
 from color_extractor import ColorExtractor
 from eot_transforms import DifferentiableEOT, PatchApplier
 from detector import YOLODetector
+from resize_modes import build_bbox_patch_positions, image_to_training_tensor
 
 
 class CAPGenTrainer:
@@ -48,6 +48,7 @@ class CAPGenTrainer:
         target_class=0,
         use_tensorboard=True,
         image_size=(640, 640),
+        resize_mode='squash',
     ):
         self.patch_size = patch_size
         self.num_base_colors = num_base_colors
@@ -58,6 +59,7 @@ class CAPGenTrainer:
         self.device = device
         self.target_class = target_class
         self.image_size = image_size
+        self.resize_mode = resize_mode
 
         # Components
         self.color_extractor = ColorExtractor(num_colors=num_base_colors)
@@ -132,29 +134,13 @@ class CAPGenTrainer:
                 continue
 
             if bboxes_per_image is not None and bboxes_per_image[i]:
-                iw, ih = img.size  # PIL (W, H)
-                sx, sy = W / iw, H / ih
-                positions = []
-                for (x1o, y1o, x2o, y2o) in bboxes_per_image[i]:
-                    # Map bbox into the resized 640×640 frame
-                    bx1, by1 = x1o * sx, y1o * sy
-                    bx2, by2 = x2o * sx, y2o * sy
-                    bw = bx2 - bx1
-                    bh = by2 - by1
-                    bcx = (bx1 + bx2) * 0.5
-                    bcy = (by1 + by2) * 0.5
-
-                    # Paper §4.2/§4.5: the patch occupies 25% of the bbox AREA,
-                    # so the (square) patch side = sqrt(0.25 * bw * bh), NOT
-                    # 0.25 * max(bw, bh) (which is a much smaller patch).
-                    placed = max(1.0, (0.25 * bw * bh) ** 0.5)
-                    scale = float(max(1e-3, placed / self.patch_size))
-                    x = int(round(bcx - placed * 0.5))
-                    y = int(round(bcy - placed * 0.5))
-                    x = max(0, min(W - int(placed), x))
-                    y = max(0, min(H - int(placed), y))
-                    positions.append((x, y, scale))
-
+                positions = build_bbox_patch_positions(
+                    img,
+                    bboxes_per_image[i],
+                    self.patch_size,
+                    image_size=self.image_size,
+                    resize_mode=self.resize_mode,
+                )
                 training_data.append((img, positions))
             else:
                 scale = float(np.random.uniform(0.3, 0.6))
@@ -233,6 +219,7 @@ class CAPGenTrainer:
         save_interval=50,
         output_dir='./output',
         fixed_base_colors=None,
+        initial_logits=None,
     ):
         os.makedirs(output_dir, exist_ok=True)
 
@@ -245,6 +232,14 @@ class CAPGenTrainer:
             base_colors = self.extract_environment_colors(env_images)
         self.generator.set_base_colors(base_colors)
         self.generator.initialize_color_prob_matrix()
+        if initial_logits is not None:
+            logits = torch.as_tensor(initial_logits, dtype=torch.float32, device=self.device)
+            if tuple(logits.shape) != tuple(self.generator.color_prob_matrix.logits.shape):
+                raise ValueError(
+                    f'initial_logits shape {tuple(logits.shape)} does not match '
+                    f'{tuple(self.generator.color_prob_matrix.logits.shape)}'
+                )
+            self.generator.color_prob_matrix.logits.data.copy_(logits)
 
         # Step 4: Adam optimiser on the color probability matrix only
         self.optimizer = optim.Adam(
@@ -259,11 +254,6 @@ class CAPGenTrainer:
             train_images, bboxes_per_image=train_bboxes,
         )
 
-        transform = transforms.Compose([
-            transforms.Resize(self.image_size),
-            transforms.ToTensor(),
-        ])
-
         # One epoch = a FULL pass over all training images in mini-batches of
         # `batch_size` (paper §4.2: batch=8, 200 epochs over the 614 INRIA
         # images). The optimizer steps once per mini-batch, so the total number
@@ -277,7 +267,7 @@ class CAPGenTrainer:
               f"{num_iterations * steps_per_epoch} total updates)...")
         print(f"Device: {self.device} | patch={self.patch_size} | K={self.num_base_colors}"
               f" | batch={batch_size} | lr={self.lr} | target_class={self.target_class}"
-              f" | input={self.image_size}"
+              f" | input={self.image_size} ({self.resize_mode})"
               f" | tau {self.temp_start}->{self.temperature}"
               f" {'(anneal)' if self.anneal_temperature else '(fixed)'}")
 
@@ -297,7 +287,11 @@ class CAPGenTrainer:
 
                 for idx in batch_indices:
                     img, positions = training_data[int(idx)]
-                    img_tensor = transform(img).to(self.device)
+                    img_tensor = image_to_training_tensor(
+                        img,
+                        image_size=self.image_size,
+                        resize_mode=self.resize_mode,
+                    ).to(self.device)
 
                     # Generate patch at the current (annealed) temperature so
                     # gradients flow to color_prob_matrix.logits.

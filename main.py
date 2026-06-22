@@ -387,6 +387,7 @@ def run_training(env_dir, args):
         target_class=Config.TARGET_CLASS,
         use_tensorboard=True,
         image_size=Config.IMAGE_SIZE,
+        resize_mode=args.resize_mode,
     )
 
     # Print config
@@ -573,6 +574,9 @@ Examples:
                        help=f'Save patch every N iterations (default: {Config.SAVE_INTERVAL})')
     parser.add_argument('--detector', type=str, default=Config.DETECTOR_MODEL,
                        help=f'YOLO model variant (default: {Config.DETECTOR_MODEL})')
+    parser.add_argument('--resize_mode', choices=['squash', 'letterbox'], default='squash',
+                       help="Training resize mode: 'squash' direct-resizes to 640x640; "
+                            "'letterbox' uses YOLOv5 letterbox before patch placement.")
 
     # Transfer arguments
     parser.add_argument('--patch_path', type=str, default=None,
