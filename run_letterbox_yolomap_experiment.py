@@ -173,9 +173,10 @@ def build_r_series(args, initial_logits, device):
 
 def train_t(args, name, base_colors, initial_logits, train_samples, device):
     out_dir = args.out_dir / name
+    final = out_dir / 'final_color_prob.pt'
     best = out_dir / 'best_color_prob.pt'
-    if best.exists() and not args.force:
-        print(f"[skip] {name} exists: {best}")
+    if final.exists() and best.exists() and not args.force:
+        print(f"[skip] {name} exists: {final}")
         return out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
     train_images = [x[0] for x in train_samples]

@@ -1,4 +1,4 @@
-# ---- datasets ----
+﻿# ---- datasets ----
 INRIAPerson/
 *.zip
 archive.zip
@@ -14,6 +14,9 @@ output_debug/
 
 # ---- generated eval summaries ----
 output*/**/*.json
+output*/**/*.csv
+cal_map_using_yolo/**/*.csv
+cal_map_using_yolo/**/*.json
 
 # ---- local restore backups ----
 restore_backups/

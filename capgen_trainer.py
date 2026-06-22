@@ -11,6 +11,7 @@ through the entire pipeline (detector → EOT → patch generation) to update
 the color probability matrix. R() is realised via EOT; S() is realised by
 constraining the patch to k base colors — no explicit regularisation term.
 """
+import gc
 import os
 import torch
 import torch.optim as optim
@@ -302,8 +303,14 @@ class CAPGenTrainer:
                     (loss / len(batch_indices)).backward()
                     epoch_loss += loss.item()
                     n_seen += 1
+                    del img_tensor, patch, loss
 
                 self.optimizer.step()
+                self.optimizer.zero_grad(set_to_none=True)
+
+            gc.collect()
+            if self.device == 'cuda':
+                torch.cuda.empty_cache()
 
             avg_loss = epoch_loss / max(1, n_seen)
 
