@@ -119,6 +119,27 @@ def run_nvidia_smi() -> str:
         return f"nvidia-smi failed: {exc}\n"
 
 
+def run_python_process_snapshot() -> str:
+    ps_cmd = (
+        "Get-CimInstance Win32_Process | "
+        "Where-Object { $_.Name -like 'python*' } | "
+        "Select-Object ProcessId,CommandLine,CreationDate | "
+        "ConvertTo-Json -Depth 4"
+    )
+    try:
+        return subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps_cmd],
+            cwd=str(ROOT),
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=30,
+        ).stdout
+    except Exception as exc:
+        return json.dumps({"error": f"python process snapshot failed: {exc}"}, indent=2)
+
 def collect_results(workspace: Path) -> None:
     subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "summarize_goal_experiments.py"), "--workspace", str(workspace)],
@@ -165,8 +186,11 @@ def write_status(workspace: Path, pending: list[Task], running: list[Running], d
         for t in done:
             writer.writerow({"timestamp": now, "state": "done", "name": t.name, "pid": "", "returncode": "0", "out_dir": t.out_dir})
 
-    smi_path = status_dir / f"nvidia_smi_{now.replace(':', '').replace('-', '').replace('T', '_')}.log"
+    stamp = now.replace(':', '').replace('-', '').replace('T', '_')
+    smi_path = status_dir / f"nvidia_smi_{stamp}.log"
     smi_path.write_text(run_nvidia_smi(), encoding="utf-8")
+    proc_path = status_dir / f"python_processes_{stamp}.json"
+    proc_path.write_text(run_python_process_snapshot(), encoding="utf-8")
 
 
 def main() -> None:
@@ -197,10 +221,14 @@ def main() -> None:
     next_monitor = time.time() + max(10, args.monitor_interval)
 
     while pending or running:
+        launched = False
         while pending and len(running) < args.max_parallel:
             task = pending.pop(0)
             print(f"launch {task.name} -> {task.out_dir}", flush=True)
             running.append(launch(task, args.python, args.val_batch_size, args.force_eval))
+            launched = True
+        if launched:
+            write_status(workspace, pending, running, done)
 
         still_running: list[Running] = []
         for item in running:
