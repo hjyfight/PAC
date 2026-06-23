@@ -153,8 +153,7 @@ def collect_results(workspace: Path) -> None:
     )
 
 
-def write_status(workspace: Path, pending: list[Task], running: list[Running], done: list[Task]) -> None:
-    status_dir = workspace / "monitor"
+def write_status(status_dir: Path, pending: list[Task], running: list[Running], done: list[Task]) -> None:
     status_dir.mkdir(parents=True, exist_ok=True)
     now = datetime.now().isoformat(timespec="seconds")
     payload = {
@@ -203,11 +202,16 @@ def main() -> None:
     ap.add_argument("--monitor_interval", type=int, default=1200)
     ap.add_argument("--val_batch_size", type=int, default=16)
     ap.add_argument("--python", default=sys.executable)
+    ap.add_argument("--monitor_dir", type=Path, default=None,
+                    help="Directory for status.json, status_history.csv, and process/GPU snapshots.")
     ap.add_argument("--force_eval", action="store_true")
     args = ap.parse_args()
 
     workspace = args.workspace.resolve()
     workspace.mkdir(parents=True, exist_ok=True)
+    monitor_dir = (args.monitor_dir.resolve()
+                   if args.monitor_dir is not None
+                   else workspace / "monitor")
     modes = [m.strip() for m in args.modes.split(',') if m.strip()]
     seeds = parse_csv_ints(args.seeds)
     tasks = build_tasks(workspace, modes, seeds)
@@ -218,7 +222,7 @@ def main() -> None:
     print(f"workspace={workspace}")
     print(f"pending={len(pending)} done={len(done)} max_parallel={args.max_parallel}", flush=True)
 
-    write_status(workspace, pending, running, done)
+    write_status(monitor_dir, pending, running, done)
     next_monitor = time.time() + max(10, args.monitor_interval)
 
     while pending or running:
@@ -229,7 +233,7 @@ def main() -> None:
             running.append(launch(task, args.python, args.val_batch_size, args.force_eval))
             launched = True
         if launched:
-            write_status(workspace, pending, running, done)
+            write_status(monitor_dir, pending, running, done)
 
         still_running: list[Running] = []
         for item in running:
@@ -247,14 +251,14 @@ def main() -> None:
         running = still_running
 
         if time.time() >= next_monitor:
-            write_status(workspace, pending, running, done)
+            write_status(monitor_dir, pending, running, done)
             collect_results(workspace)
             print(f"monitor {datetime.now().isoformat(timespec='seconds')}: pending={len(pending)} running={len(running)} done={len(done)}", flush=True)
             next_monitor = time.time() + max(10, args.monitor_interval)
 
         time.sleep(30)
 
-    write_status(workspace, pending, running, done)
+    write_status(monitor_dir, pending, running, done)
     collect_results(workspace)
     print("all queued experiments finished", flush=True)
 
