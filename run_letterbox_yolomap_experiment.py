@@ -112,7 +112,8 @@ def render_color_prob_png(path, logits, base_colors_255, tau, patch_size, device
 def train_advpatch(args):
     adv_dir = args.out_dir
     best = adv_dir / 'best_advpatch.pt'
-    if best.exists() and not args.force:
+    final = adv_dir / 'final_advpatch.pt'
+    if best.exists() and final.exists() and not args.force:
         print(f"[skip] AdvPatch exists: {best}")
         return best
     cmd = [
@@ -133,6 +134,8 @@ def train_advpatch(args):
     run(cmd, cwd=args.repo_dir)
     if not best.exists():
         raise FileNotFoundError(best)
+    if not final.exists():
+        raise FileNotFoundError(final)
     return best
 
 
