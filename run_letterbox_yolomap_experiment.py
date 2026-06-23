@@ -1,11 +1,11 @@
-"""End-to-end letterbox training + YOLOv5-official mAP evaluation.
+"""End-to-end AdvPatch/CAPGen experiment + YOLOv5-official mAP evaluation.
 
 Pipeline:
-  1. Train AdvPatch with --resize_mode letterbox.
+  1. Train AdvPatch with the selected resize mode: squash or letterbox.
   2. Build CAPGen-P linear patches from the trained AdvPatch.
   3. Build CAPGen-R from one random continuous m_r.
   4. Train CAPGen-T1/T2 from the same m_r with fixed tau=0.1.
-  5. Render clean/patched INRIA test sets as 640x640 letterbox images.
+  5. Render clean/patched INRIA test sets using the same resize geometry.
   6. Evaluate each set with yolov5/val.py and save official mAP results.
 """
 import argparse
@@ -14,6 +14,7 @@ import hashlib
 import json
 import math
 import os
+import random
 import re
 import shutil
 import subprocess
@@ -122,9 +123,10 @@ def train_advpatch(args):
         '--batch_size', str(args.batch_size),
         '--lr', str(args.adv_lr),
         '--detector', args.detector,
-        '--resize_mode', 'letterbox',
+        '--resize_mode', args.resize_mode,
         '--save_interval', str(args.save_interval),
         '--output_dir', str(adv_dir),
+        '--seed', str(args.seed),
     ]
     if args.max_train_images is not None:
         cmd += ['--max_train_images', str(args.max_train_images)]
@@ -193,7 +195,7 @@ def train_t(args, name, base_colors, initial_logits, train_samples, device):
         target_class=0,
         use_tensorboard=False,
         image_size=(640, 640),
-        resize_mode='letterbox',
+        resize_mode=args.resize_mode,
     )
     trainer.train(
         env_images=train_images,
@@ -312,10 +314,10 @@ def render_dataset(args, method, patch, samples, device):
     lab_dir.mkdir(parents=True, exist_ok=True)
     applier = PatchApplier(args.patch_size)
     for i, (img, bboxes) in enumerate(tqdm(samples, desc=f'render {method}')):
-        tensor = image_to_training_tensor(img, (640, 640), 'letterbox').to(device)
-        label_boxes = transform_bboxes(img, bboxes, (640, 640), 'letterbox')
+        tensor = image_to_training_tensor(img, (640, 640), args.resize_mode).to(device)
+        label_boxes = transform_bboxes(img, bboxes, (640, 640), args.resize_mode)
         if patch is not None:
-            positions = build_bbox_patch_positions(img, bboxes, args.patch_size, (640, 640), 'letterbox')
+            positions = build_bbox_patch_positions(img, bboxes, args.patch_size, (640, 640), args.resize_mode)
             with torch.no_grad():
                 for x, y, scale in positions:
                     tensor = applier.apply_patch(tensor, patch, x, y, scale)
@@ -394,6 +396,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--out_dir', default='output_advpatch_retrain_20260622-letterbox_yolomap')
     ap.add_argument('--dataset_dir', default='./INRIAPerson')
+    ap.add_argument('--resize_mode', choices=['squash', 'letterbox'], default='letterbox')
     ap.add_argument('--detector', default=Config.DETECTOR_MODEL)
     ap.add_argument('--patch_size', type=int, default=Config.PATCH_SIZE)
     ap.add_argument('--num_colors', type=int, default=Config.NUM_BASE_COLORS)
@@ -406,7 +409,7 @@ def main():
     ap.add_argument('--save_interval', type=int, default=Config.SAVE_INTERVAL)
     ap.add_argument('--max_train_images', type=int, default=None)
     ap.add_argument('--max_test_images', type=int, default=None)
-    ap.add_argument('--seed', type=int, default=None, help='Seed only for shared R/T initial m_r. Default: entropy.')
+    ap.add_argument('--seed', type=int, default=None, help='Seed numpy/python/torch plus AdvPatch and shared R/T initial m_r. Default: entropy.')
     ap.add_argument('--conf_thres', type=float, default=0.001)
     ap.add_argument('--val_batch_size', type=int, default=16)
     ap.add_argument('--force', action='store_true')
@@ -420,10 +423,15 @@ def main():
 
     if args.seed is None:
         args.seed = int(np.random.SeedSequence().entropy) % (2 ** 32 - 1)
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Output: {args.out_dir}")
     print(f"Device: {device}")
-    print(f"Resize mode: letterbox, tau={args.tau}, R/T seed={args.seed}")
+    print(f"Resize mode: {args.resize_mode}, tau={args.tau}, seed={args.seed}")
 
     advpatch = train_advpatch(args)
     p_dir = build_p_series(args, advpatch)
@@ -466,7 +474,7 @@ def main():
             'command': ' '.join(sys.argv),
             'out_dir': str(args.out_dir),
             'dataset_dir': args.dataset_dir,
-            'resize_mode': 'letterbox',
+            'resize_mode': args.resize_mode,
             'eval_backend': 'yolov5/val.py official metrics',
             'conf_thres': args.conf_thres,
             'patch_frac': 0.25,

@@ -24,6 +24,7 @@ it with environment base colors (Eq.4) without retraining.
 """
 import argparse
 import os
+import random
 
 import numpy as np
 import torch
@@ -90,12 +91,21 @@ def main():
     ap.add_argument('--max_train_images', type=int, default=None)
     ap.add_argument('--save_interval', type=int, default=50)
     ap.add_argument('--output_dir', default='./output_advpatch')
+    ap.add_argument('--seed', type=int, default=None,
+                    help='Seed numpy/python/torch for reproducible AdvPatch retries.')
     args = ap.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
+    if args.seed is not None:
+        random.seed(args.seed)
+        np.random.seed(args.seed)
+        torch.manual_seed(args.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(args.seed)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Device: {device} | patch={args.patch_size} | batch={args.batch_size}"
-          f" | lr={args.lr} | epochs={args.num_iterations} | resize={args.resize_mode}")
+          f" | lr={args.lr} | epochs={args.num_iterations} | resize={args.resize_mode}"
+          f" | seed={args.seed}")
 
     samples = load_inria(args.dataset_dir, split='train',
                          max_images=args.max_train_images)
