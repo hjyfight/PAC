@@ -116,7 +116,7 @@ def train_advpatch(args):
         print(f"[skip] AdvPatch exists: {best}")
         return best
     cmd = [
-        sys.executable, 'advpatch_trainer.py',
+        sys.executable, '-u', 'advpatch_trainer.py',
         '--dataset_dir', args.dataset_dir,
         '--patch_size', str(args.patch_size),
         '--num_iterations', str(args.adv_epochs),
@@ -146,7 +146,7 @@ def build_p_series(args, advpatch_path):
         return p_dir
     p_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
-        sys.executable, 'make_capgen_p.py',
+        sys.executable, '-u', 'make_capgen_p.py',
         '--method', 'advpatch-rgb-linear',
         '--advpatch', str(advpatch_path),
         '--out_dir', str(p_dir),
@@ -359,7 +359,7 @@ def run_yolo_val(args, method, yaml_path):
             print(f"[skip] YOLO val exists: {method}")
             return existing['results'][method]
     cmd = [
-        sys.executable, args.yolov5_dir / 'val.py',
+        sys.executable, '-u', args.yolov5_dir / 'val.py',
         '--weights', args.yolov5_dir / 'yolov5s.pt',
         '--data', yaml_path,
         '--imgsz', '640',

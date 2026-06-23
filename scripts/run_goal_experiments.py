@@ -71,6 +71,7 @@ def launch(task: Task, python_exe: str, val_batch_size: int, force_eval: bool) -
     task.out_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
         python_exe,
+        "-u",
         "-B",
         str(ROOT / "run_letterbox_yolomap_experiment.py"),
         "--out_dir",
