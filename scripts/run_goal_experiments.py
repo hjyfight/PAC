@@ -200,6 +200,8 @@ def main() -> None:
     ap.add_argument("--seeds", default=",".join(str(x) for x in DEFAULT_SEEDS))
     ap.add_argument("--max_parallel", type=int, default=3)
     ap.add_argument("--monitor_interval", type=int, default=1200)
+    ap.add_argument("--launch_delay", type=float, default=0.0,
+                    help="Seconds to wait after launching each task, useful to stagger CUDA model loads.")
     ap.add_argument("--val_batch_size", type=int, default=16)
     ap.add_argument("--python", default=sys.executable)
     ap.add_argument("--monitor_dir", type=Path, default=None,
@@ -232,6 +234,8 @@ def main() -> None:
             print(f"launch {task.name} -> {task.out_dir}", flush=True)
             running.append(launch(task, args.python, args.val_batch_size, args.force_eval))
             launched = True
+            if args.launch_delay > 0 and pending and len(running) < args.max_parallel:
+                time.sleep(args.launch_delay)
         if launched:
             write_status(monitor_dir, pending, running, done)
 
