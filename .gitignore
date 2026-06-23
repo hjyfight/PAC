@@ -1,4 +1,4 @@
-﻿# ---- datasets ----
+# ---- datasets ----
 INRIAPerson/
 *.zip
 archive.zip
@@ -17,6 +17,8 @@ output*/**/*.json
 output*/**/*.csv
 cal_map_using_yolo/**/*.csv
 cal_map_using_yolo/**/*.json
+cal_map_using_yolo-squash-val-using-yolo_map/
+
 
 # ---- local restore backups ----
 restore_backups/
@@ -53,3 +55,12 @@ Thumbs.db
 
 # ---- vscode local config ----
 .vscode/
+
+# ---- generated run artifacts ----
+goal-workspace/
+*.log
+*.csv
+*.json
+
+# ---- vendored/local external deps ----
+yolov5/
