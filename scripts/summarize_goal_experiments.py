@@ -40,6 +40,29 @@ def fnum(row: dict[str, str], key: str) -> float | None:
         return None
 
 
+def read_file_status(workspace: Path) -> list[dict[str, object]]:
+    statuses: list[dict[str, object]] = []
+    for csv_path in sorted(workspace.rglob("official_yolo_results.csv")):
+        rel = csv_path.relative_to(workspace)
+        methods: list[str] = []
+        with csv_path.open("r", encoding="utf-8", newline="") as f:
+            for row in csv.DictReader(f):
+                method = row.get("method", "").strip()
+                if method:
+                    methods.append(method)
+        missing = [m for m in METHOD_ORDER if m not in set(methods)]
+        statuses.append({
+            "run": str(rel.parent).replace("\\", "/"),
+            "resize_mode": infer_resize_mode(csv_path),
+            "complete": "yes" if not missing else "no",
+            "row_count": len(methods),
+            "methods": ",".join(methods),
+            "missing_methods": ",".join(missing),
+            "result_csv": str(csv_path),
+        })
+    return statuses
+
+
 def write_csv(path: Path, rows: list[dict[str, object]], fields: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as f:
@@ -56,6 +79,11 @@ def main() -> None:
 
     workspace = args.workspace.resolve()
     rows = read_results(workspace)
+    file_status = read_file_status(workspace)
+    status_fields = [
+        "run", "resize_mode", "complete", "row_count", "methods", "missing_methods", "result_csv",
+    ]
+    write_csv(workspace / "result_file_status.csv", file_status, status_fields)
     fields = [
         "run", "resize_mode", "method", "mAP50_percent", "mAP50_95_percent",
         "precision", "recall", "images", "instances", "result_csv",
@@ -79,6 +107,11 @@ def main() -> None:
 
     print(f"found result files: {len(set(r['result_csv'] for r in rows))}")
     print(f"rows: {len(rows)}")
+    incomplete = [s for s in file_status if s.get("complete") != "yes"]
+    if incomplete:
+        print("incomplete result files:")
+        for item in incomplete:
+            print(f"  {item['run']} missing {item['missing_methods']}")
     if best_rows:
         print("best mAP50 by resize/method:")
         for row in best_rows:

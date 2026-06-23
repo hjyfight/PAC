@@ -19,6 +19,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SEEDS = [1101, 2202, 3303]
+COMPLETE_METHODS = {"clean", "advpatch", "p0", "p1", "p2", "r1", "r2", "t1", "t2"}
 
 
 @dataclass
@@ -64,7 +65,19 @@ def build_tasks(workspace: Path, modes: list[str], seeds: list[int]) -> list[Tas
 
 
 def result_exists(task: Task) -> bool:
-    return (task.out_dir / "official_yolo_results.csv").exists()
+    csv_path = task.out_dir / "official_yolo_results.csv"
+    if not csv_path.exists():
+        return False
+    try:
+        with csv_path.open("r", encoding="utf-8", newline="") as f:
+            methods = {
+                row.get("method", "").strip()
+                for row in csv.DictReader(f)
+                if row.get("method", "").strip()
+            }
+    except Exception:
+        return False
+    return COMPLETE_METHODS.issubset(methods)
 
 
 def launch(task: Task, python_exe: str, val_batch_size: int, force_eval: bool) -> Running:
