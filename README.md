@@ -21,7 +21,7 @@ pip install -r requirements.txt
 ## Quick Start
 
 ### Demo Mode (No GPU required)
-```bash
+```bash 
 python main.py --mode demo
 ```
 
@@ -123,25 +123,3 @@ CAPGen-R1/R2	    86.3 / 85.4	                43.00 / 41.92	    mAP 失真，det_
 代码是否按论文写：大部分训练框架是按论文描述写的，但 CAPGen-P 这一步存在论文描述不清导致的实现偏差。
 
 已经基本按论文实现的部分：
-
-INRIA Person，输入 resize 到 640x640
-patch 放在 person bbox 上，面积约为 bbox 的 25%
-batch size 8，Adam lr 0.03，epoch 200
-K=3 base colors
-Eq.(3)：r_k = Softmax(log(m_ijk) / tau)，tau=0.1
-EOT：亮度、对比度、噪声、旋转、缩放
-CAPGen-T/T1/T2：训练 color probability matrix
-CAPGen-R：随机 color probability matrix
-AdvPatch：自由像素补丁训练
-没有完全解决的部分：
-
-论文说 CAPGen-P1/P2 是“先用 AdvPatch 生成强补丁，再把 AdvPatch 的颜色替换成 Bc1/Bc2”。但论文没有给出 raw AdvPatch 如何精确分解成 pattern + colors / r_k 的代码级算法。
-
-当前代码尝试过两类做法：
-
-从 raw AdvPatch 做 K-means / soft decomposition，再换 Bc1/Bc2
-问题：P0 都不能很好重构 raw AdvPatch，pattern 已经损坏，所以 P1/P2 必然弱。
-
-用训练好的 CAPGen-T matrix 作为 source pattern，再按 Eq.(4) 换色
-优点：更符合 Eq.(4) 的“固定 r_k，只换 base colors”；P0 能和 source patch 对齐。
-问题：严格说它不是论文原文里的“AdvPatch pattern + Bc1/Bc2”，因为 source pattern 来自 CAPGen-T，而不是 raw AdvPatch。
