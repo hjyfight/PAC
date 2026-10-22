@@ -39,6 +39,7 @@ class Running:
     task: Task
     proc: subprocess.Popen
     started_at: str
+    gpu_id: str | None = None
 
 
 def parse_csv_ints(text: str) -> list[int]:
@@ -80,7 +81,7 @@ def result_exists(task: Task) -> bool:
     return COMPLETE_METHODS.issubset(methods)
 
 
-def launch(task: Task, python_exe: str, val_batch_size: int, force_eval: bool) -> Running:
+def launch(task: Task, python_exe: str, val_batch_size: int, val_workers: int, force_eval: bool, gpu_id: str | None = None) -> Running:
     task.out_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
         python_exe,
@@ -95,14 +96,19 @@ def launch(task: Task, python_exe: str, val_batch_size: int, force_eval: bool) -
         str(task.seed),
         "--val_batch_size",
         str(val_batch_size),
+        "--val_workers",
+        str(val_workers),
     ]
     if force_eval:
         cmd.append("--force_eval")
 
     env = dict(os.environ)
     env["PYTHONIOENCODING"] = "utf-8"
+    if gpu_id is not None:
+        env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
     log = task.log_path.open("a", encoding="utf-8", errors="replace", buffering=1)
-    header = f"\n=== {datetime.now().isoformat(timespec='seconds')} START {task.name}: {' '.join(cmd)} ===\n"
+    gpu_note = f" CUDA_VISIBLE_DEVICES={gpu_id}" if gpu_id is not None else ""
+    header = f"\n=== {datetime.now().isoformat(timespec='seconds')} START {task.name}{gpu_note}: {' '.join(cmd)} ===\n"
     log.write(header)
     proc = subprocess.Popen(
         cmd,
@@ -114,7 +120,7 @@ def launch(task: Task, python_exe: str, val_batch_size: int, force_eval: bool) -
         errors="replace",
         env=env,
     )
-    return Running(task=task, proc=proc, started_at=datetime.now().isoformat(timespec="seconds"))
+    return Running(task=task, proc=proc, started_at=datetime.now().isoformat(timespec="seconds"), gpu_id=gpu_id)
 
 
 def run_nvidia_smi() -> str:
@@ -178,6 +184,7 @@ def write_status(status_dir: Path, pending: list[Task], running: list[Running], 
                 "pid": r.proc.pid,
                 "returncode": r.proc.poll(),
                 "started_at": r.started_at,
+                "gpu_id": r.gpu_id,
                 "has_result_csv": result_exists(r.task),
             }
             for r in running
@@ -189,15 +196,15 @@ def write_status(status_dir: Path, pending: list[Task], running: list[Running], 
     csv_path = status_dir / "status_history.csv"
     new_file = not csv_path.exists()
     with csv_path.open("a", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["timestamp", "state", "name", "pid", "returncode", "out_dir"])
+        writer = csv.DictWriter(f, fieldnames=["timestamp", "state", "name", "pid", "returncode", "gpu_id", "out_dir"])
         if new_file:
             writer.writeheader()
         for t in pending:
-            writer.writerow({"timestamp": now, "state": "pending", "name": t.name, "pid": "", "returncode": "", "out_dir": t.out_dir})
+            writer.writerow({"timestamp": now, "state": "pending", "name": t.name, "pid": "", "returncode": "", "gpu_id": "", "out_dir": t.out_dir})
         for r in running:
-            writer.writerow({"timestamp": now, "state": "running", "name": r.task.name, "pid": r.proc.pid, "returncode": r.proc.poll(), "out_dir": r.task.out_dir})
+            writer.writerow({"timestamp": now, "state": "running", "name": r.task.name, "pid": r.proc.pid, "returncode": r.proc.poll(), "gpu_id": r.gpu_id or "", "out_dir": r.task.out_dir})
         for t in done:
-            writer.writerow({"timestamp": now, "state": "done", "name": t.name, "pid": "", "returncode": "0", "out_dir": t.out_dir})
+            writer.writerow({"timestamp": now, "state": "done", "name": t.name, "pid": "", "returncode": "0", "gpu_id": "", "out_dir": t.out_dir})
 
     stamp = now.replace(':', '').replace('-', '').replace('T', '_')
     smi_path = status_dir / f"nvidia_smi_{stamp}.log"
@@ -216,6 +223,9 @@ def main() -> None:
     ap.add_argument("--launch_delay", type=float, default=0.0,
                     help="Seconds to wait after launching each task, useful to stagger CUDA model loads.")
     ap.add_argument("--val_batch_size", type=int, default=16)
+    ap.add_argument("--val_workers", type=int, default=8)
+    ap.add_argument("--gpu_ids", default=None,
+                    help="Comma-separated physical GPU ids. Each launched task gets one id via CUDA_VISIBLE_DEVICES.")
     ap.add_argument("--python", default=sys.executable)
     ap.add_argument("--monitor_dir", type=Path, default=None,
                     help="Directory for status.json, status_history.csv, and process/GPU snapshots.")
@@ -230,12 +240,13 @@ def main() -> None:
     modes = [m.strip() for m in args.modes.split(',') if m.strip()]
     seeds = parse_csv_ints(args.seeds)
     tasks = build_tasks(workspace, modes, seeds)
+    gpu_ids = [g.strip() for g in args.gpu_ids.split(',') if g.strip()] if args.gpu_ids else []
 
     pending = [t for t in tasks if not result_exists(t)]
     done = [t for t in tasks if result_exists(t)]
     running: list[Running] = []
     print(f"workspace={workspace}")
-    print(f"pending={len(pending)} done={len(done)} max_parallel={args.max_parallel}", flush=True)
+    print(f"pending={len(pending)} done={len(done)} max_parallel={args.max_parallel} gpu_ids={gpu_ids or 'inherit'}", flush=True)
 
     write_status(monitor_dir, pending, running, done)
     next_monitor = time.time() + max(10, args.monitor_interval)
@@ -243,9 +254,17 @@ def main() -> None:
     while pending or running:
         launched = False
         while pending and len(running) < args.max_parallel:
+            used_gpus = {r.gpu_id for r in running if r.gpu_id is not None}
+            gpu_id = None
+            if gpu_ids:
+                available = [g for g in gpu_ids if g not in used_gpus]
+                if not available:
+                    break
+                gpu_id = available[0]
             task = pending.pop(0)
-            print(f"launch {task.name} -> {task.out_dir}", flush=True)
-            running.append(launch(task, args.python, args.val_batch_size, args.force_eval))
+            gpu_note = f" on GPU {gpu_id}" if gpu_id is not None else ""
+            print(f"launch {task.name}{gpu_note} -> {task.out_dir}", flush=True)
+            running.append(launch(task, args.python, args.val_batch_size, args.val_workers, args.force_eval, gpu_id))
             launched = True
             if args.launch_delay > 0 and pending and len(running) < args.max_parallel:
                 time.sleep(args.launch_delay)
