@@ -67,3 +67,10 @@ goal-workspace/
 
 # ---- vendored/local external deps ----
 yolov5/
+
+
+# generated YOLO label files
+runs_squash6/
+runs*/**/labels/
+runs*/**/yolo_official_datasets/
+third_party/
