@@ -368,7 +368,7 @@ def run_yolo_val(args, method, yaml_path):
         '--imgsz', '640',
         '--conf-thres', str(args.conf_thres),
         '--batch-size', str(args.val_batch_size),
-        '--workers', '0',
+        '--workers', str(args.val_workers),
         '--project', args.out_dir / 'yolo_official_runs',
         '--name', f'{method}_official_conf{str(args.conf_thres).replace(".", "")}',
         '--exist-ok',
@@ -415,6 +415,7 @@ def main():
     ap.add_argument('--seed', type=int, default=None, help='Seed numpy/python/torch plus AdvPatch and shared R/T initial m_r. Default: entropy.')
     ap.add_argument('--conf_thres', type=float, default=0.001)
     ap.add_argument('--val_batch_size', type=int, default=16)
+    ap.add_argument('--val_workers', type=int, default=8)
     ap.add_argument('--force', action='store_true')
     ap.add_argument('--force_eval', action='store_true')
     args = ap.parse_args()
@@ -452,6 +453,7 @@ def main():
 
     methods = [
         ('clean', None, None),
+        ('gray', 'gray', None),
         ('advpatch', 'raw', advpatch),
         ('p0', 'raw', p_dir / 'capgen_p_orig_linear.pt'),
         ('p1', 'raw', p_dir / 'capgen_p1_linear.pt'),
@@ -469,6 +471,10 @@ def main():
             patch = load_raw_patch(path, device)
         elif kind == 'cp':
             patch = load_color_prob_patch(path, device)
+        elif kind == 'gray':
+            # Table 1 "Gray" baseline: uniform 127/255 patch, same size/placement.
+            patch = torch.full((3, args.patch_size, args.patch_size),
+                               127.0 / 255.0, device=device)
         else:
             patch = None
         yaml_path = render_dataset(args, method, patch, test_samples, device)
@@ -480,6 +486,7 @@ def main():
             'resize_mode': args.resize_mode,
             'eval_backend': 'yolov5/val.py official metrics',
             'conf_thres': args.conf_thres,
+            'val_workers': args.val_workers,
             'patch_frac': 0.25,
             'tau': args.tau,
             'seed_rt_initial_mr': args.seed,

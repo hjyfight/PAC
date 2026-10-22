@@ -49,23 +49,24 @@ class YOLODetector(nn.Module):
         `DetectMultiBackend` directly on a pre-normalised tensor.
         """
         import os
-        hub_dir = os.path.expanduser('~/.cache/torch/hub/ultralytics_yolov5_master')
-        local_weights = os.path.join(hub_dir, f'{self.model_name}.pt')
-        if os.path.isdir(hub_dir) and os.path.isfile(local_weights):
-            hub_model = torch.hub.load(
-                hub_dir, 'custom', path=local_weights,
-                source='local', verbose=False,
+        repo_dir = os.path.dirname(os.path.abspath(__file__))
+        local_yolov5 = os.path.join(repo_dir, 'yolov5')
+        weight_candidates = [
+            os.path.join(local_yolov5, f'{self.model_name}.pt'),
+            os.path.join(repo_dir, f'{self.model_name}.pt'),
+        ]
+        local_weights = next((w for w in weight_candidates if os.path.isfile(w)), None)
+        if not os.path.isdir(local_yolov5):
+            raise FileNotFoundError(f'Local YOLOv5 directory not found: {local_yolov5}')
+        if local_weights is None:
+            raise FileNotFoundError(
+                f'Local YOLOv5 weights not found. Tried: {weight_candidates}'
             )
-        else:
-            try:
-                hub_model = torch.hub.load(
-                    'ultralytics/yolov5', self.model_name,
-                    pretrained=True, trust_repo=True, verbose=False,
-                )
-            except TypeError:
-                hub_model = torch.hub.load(
-                    'ultralytics/yolov5', self.model_name, pretrained=True
-                )
+
+        hub_model = torch.hub.load(
+            local_yolov5, 'custom', path=local_weights,
+            source='local', verbose=False,
+        )
         hub_model.conf = self.conf_threshold
 
         # Keep the AutoShape wrapper for high-level (non-differentiable) detect()
